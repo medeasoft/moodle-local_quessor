@@ -35,7 +35,7 @@ Quessor is an AI-assisted evaluation platform for educators and educational inst
 1. Navigate to the root directory of your Moodle installation.
 2. Clone this repository into the `local/quessor` folder:
    ```bash
-   git clone https://github.com/medeasoft/quessor-moodle.git local/quessor
+   git clone https://github.com/medeasoft/moodle-local_quessor.git local/quessor
    ```
    *(Note: The folder inside `local/` must be named `quessor`.)*
 3. Visit **Site administration → Notifications** or run the CLI upgrade command:
