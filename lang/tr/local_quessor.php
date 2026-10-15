@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 $string['pluginname'] = 'Quessor';
 $string['quessor'] = 'Quessor';
@@ -9,8 +25,23 @@ $string['hub_link'] = 'Quessor';
 $string['settings'] = 'Quessor ayarları';
 $string['installheading'] = 'Quessor eklentisi';
 $string['installintro'] = 'Bu alanlar Moodle’ın kendi ayarı değil, <strong>Quessor</strong> eklentisine (local_quessor) aittir. Quessor bu siteyi sizin Quessor kurumunuza bağlamak için kullanır.';
+$string['integrationenabled'] = 'Quessor bağlantısını etkinleştir';
+$string['integrationenabled_desc'] = 'Etkinleştirildiğinde site bilgileri Quessor’a kayıt için gönderilir. Öğrenci listesi ve gönderileri yalnızca öğretmen bir aktiviteyi Quessor’a bağlayıp değerlendirmeyi açıkça başlattığında gönderilir. Bu ayarı kapatmak sonraki iletişimi durdurur.';
+$string['integrationdisabled'] = 'Quessor bağlantısı devre dışı. Veri gönderilmeden önce site yöneticisi Quessor ayarlarından bağlantıyı etkinleştirmelidir.';
+$string['connectactivitytitle'] = 'Bu aktiviteyi Quessor’a bağla';
+$string['connectactivitydesc'] = 'Bağlantı, Quessor’ın bu aktivitenin soru ve ölçütlerini almasını sağlar. Öğrenci gönderileri yalnızca değerlendirmeyi açıkça başlattığınızda kuyruğa alınır.';
+$string['connectactivitybutton'] = 'Bağla ve devam et';
+$string['conversionpendingfile'] = 'Moodle “{$a}” kaynak dosyasını hâlâ dönüştürüyor. Dönüştürme tamamlandıktan sonra yeniden deneyin.';
+$string['conversionunsupportedfile'] = 'Moodle “{$a}” kaynak dosyasını desteklenen bir biçime dönüştüremedi.';
+$string['evaluationinprogress'] = 'Değerlendirme hâlâ sürüyor. Tamamlanmadan notlar yayımlanamaz.';
+$string['submissionpdftitle'] = 'Moodle gönderimi';
+$string['apierror'] = 'Quessor bu isteği tamamlayamadı (HTTP {$a}). Daha sonra yeniden deneyin veya Moodle yöneticinizle iletişime geçin.';
+$string['mediaunavailable'] = 'Quessor değerlendirme dosyasını yükleyemedi. Lütfen daha sonra yeniden deneyin.';
+$string['quizgradefailed'] = 'Moodle Quiz deneme notunu güncelleyemedi. Quiz ayarlarını kontrol edip yeniden deneyin.';
+$string['apiresponseinvalid'] = 'Quessor geçersiz bir yanıt verdi. Lütfen daha sonra yeniden deneyin veya Moodle yöneticinizle iletişime geçin.';
+$string['activitynotconnected'] = 'Değerlendirme hizmetlerini kullanmadan önce bir öğretmen bu aktiviteyi Quessor’a bağlamalıdır.';
 $string['instituteemail'] = 'Quessor kurum e-postası';
-$string['instituteemail_desc'] = 'Bu Moodle sitesinin Quessor’daki fatura ve hesap iletişim adresi. Kaydetmek yalnızca Quessor’u günceller; Moodle kullanıcı hesabı oluşturmaz veya değiştirmez.';
+$string['instituteemail_desc'] = 'Bu Moodle sitesinin fatura ve hesap iletişim adresi. Bu değer yalnızca site yöneticisi Quessor bağlantısını etkinleştirdikten sonra gönderilir.';
 $string['hub_page'] = 'Değerlendirme merkezi';
 $string['openhub'] = 'Değerlendirme merkezini aç';
 $string['payment_heading'] = 'Kredi ve ödeme';
@@ -38,6 +69,7 @@ $string['activityeyebrow'] = 'Değerlendirme geçmişi';
 $string['assignmentlabel'] = 'Ödev';
 $string['conversionpending'] = '{$a} gönderim Moodle tarafından PDF biçimine dönüştürülüyor. Kısa süre sonra bu sayfayı yenileyin.';
 $string['conversionunsupported'] = '{$a} gönderimde Moodle’ın PDF biçimine dönüştüremediği içerik var. Moodle belge dönüştürücüsünü etkinleştirin veya öğrenciden PDF, JPEG ya da PNG isteyin.';
+$string['forumgradeunconfigured'] = 'Quessor notlarını yayımlamadan önce Forum ayarlarında tüm forum için notlandırmayı etkinleştirin.';
 $string['quiznoreadyresponses'] = 'Bu quiz’de bitmiş deneme var ama Quessor’a gönderilecek öğrenci sayfası oluşmadı. Önizleme denemeleri, boş cevaplar ve öğretmen/yönetici denemeleri atlanır. Essay varsa o gönderilir; yoksa diğer soru yanıtları kullanılır.';
 $string['task_sync_submission'] = 'Moodle yeniden gönderimini Quessor ile eşitle';
 $string['unsupportedactivity'] = 'Bu Moodle aktivitesi Quessor tarafından desteklenmiyor.';
@@ -262,7 +294,7 @@ $string['privacy:metadata:local_quessor_submission:submissionid'] = 'Moodle gön
 $string['privacy:metadata:local_quessor_submission:status'] = 'Quessor’dan dönen değerlendirme durumu.';
 $string['privacy:metadata:local_quessor_submission:grade'] = 'Quessor’dan dönen not.';
 $string['privacy:metadata:local_quessor_submission:feedback'] = 'Quessor’dan dönen geri bildirim.';
-$string['privacy:metadata:quessor'] = 'Öğretmen kimliği ve öğrenci gönderim içeriği değerlendirme için Quessor API’sine gönderilir.';
+$string['privacy:metadata:quessor'] = 'Site yöneticisi bağlantıyı etkinleştirdikten sonra site adı ve kurum iletişim e-postası kayıt için gönderilir. Öğretmenin bağladığı her aktivite için öğretmen kimliği, ders/aktivite bağlamı, görünür öğrenci listesi ve gönderi metni/dosyaları değerlendirme amacıyla Quessor’a gönderilebilir. Otomatik gönderi aktarımı yalnızca bağlanan aktivitelerle sınırlıdır.';
 $string['privacy:metadata:quessor:userid'] = 'Öğretmen veya öğrencinin Moodle kullanıcı kimliği.';
 $string['privacy:metadata:quessor:email'] = 'Öğretmen veya öğrencinin Moodle e-posta adresi.';
 $string['privacy:metadata:quessor:studentname'] = 'Değerlendirmede görünen öğrenci adı.';

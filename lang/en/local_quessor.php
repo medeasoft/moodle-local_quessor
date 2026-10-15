@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 $string['pluginname'] = 'Quessor';
 $string['quessor'] = 'Quessor';
@@ -9,8 +25,23 @@ $string['hub_link'] = 'Quessor';
 $string['settings'] = 'Quessor settings';
 $string['installheading'] = 'Quessor plugin';
 $string['installintro'] = 'These fields belong to the <strong>Quessor</strong> Moodle plugin (local_quessor), not to Moodle itself. Quessor uses them to link this site to your Quessor institution.';
+$string['integrationenabled'] = 'Enable Quessor integration';
+$string['integrationenabled_desc'] = 'When enabled, Quessor receives site details for registration. Student roster and submission data are sent only after a teacher connects an activity and explicitly launches its evaluation. Disable this setting to stop further communication.';
+$string['integrationdisabled'] = 'Quessor integration is disabled. A site administrator must enable it in Quessor settings before data can be sent.';
+$string['connectactivitytitle'] = 'Connect this activity to Quessor';
+$string['connectactivitydesc'] = 'Connecting allows Quessor to receive this activity’s question and criteria. Student submissions are queued only when you explicitly launch evaluation.';
+$string['connectactivitybutton'] = 'Connect and continue';
+$string['conversionpendingfile'] = 'Moodle is still converting the source file “{$a}”. Try again after conversion finishes.';
+$string['conversionunsupportedfile'] = 'Moodle could not convert the source file “{$a}” to a supported format.';
+$string['evaluationinprogress'] = 'Evaluation is still running. Grades cannot be published until it finishes.';
+$string['submissionpdftitle'] = 'Moodle submission';
+$string['apierror'] = 'Quessor could not complete this request (HTTP {$a}). Please try again later or contact your Moodle administrator.';
+$string['mediaunavailable'] = 'Quessor could not load this evaluation file. Please try again later.';
+$string['quizgradefailed'] = 'Moodle could not update the Quiz attempt grade. Check the Quiz settings and try again.';
+$string['apiresponseinvalid'] = 'Quessor returned an invalid response. Please try again later or contact your Moodle administrator.';
+$string['activitynotconnected'] = 'A teacher must connect this activity to Quessor before using its evaluation services.';
 $string['instituteemail'] = 'Quessor institution email';
-$string['instituteemail_desc'] = 'Billing and account contact for this Moodle site in Quessor. Saving this page updates Quessor only. It does not create or change Moodle user accounts.';
+$string['instituteemail_desc'] = 'Billing and account contact for this Moodle site. This value is sent to Quessor only after the site administrator enables the integration.';
 $string['hub_page'] = 'Evaluation hub';
 $string['openhub'] = 'Open the evaluation hub';
 $string['payment_heading'] = 'Credits and payment';
@@ -134,6 +165,7 @@ $string['datasource_students_description'] = 'Enrolled users without Quessor gra
 $string['datasource_context_description'] = 'Visible Page, Book, Label, and text Resource content outside this activity is sent separately from the student answer. Context length: {$a->contextlength} characters.';
 $string['conversionpending'] = '{$a} submission(s) are being converted to PDF by Moodle. Refresh this page shortly.';
 $string['conversionunsupported'] = '{$a} submission(s) contain content that Moodle cannot convert to PDF. Enable a Moodle document converter or ask the student for a PDF, JPEG, or PNG file.';
+$string['forumgradeunconfigured'] = 'Enable whole-forum grading in the Forum settings before publishing Quessor grades.';
 $string['quiznoreadyresponses'] = 'This quiz has finished attempts, but none produced a student page for Quessor. Preview attempts, empty answers, and teacher/admin attempts are skipped. Essay answers are sent when present; otherwise other question responses are used.';
 $string['privacy:metadata:local_quessor_submission'] = 'Stores the link between a Moodle assignment submission and its Quessor evaluation.';
 $string['privacy:metadata:local_quessor_submission:userid'] = 'The Moodle user whose submission was evaluated.';
@@ -141,7 +173,7 @@ $string['privacy:metadata:local_quessor_submission:submissionid'] = 'The Moodle 
 $string['privacy:metadata:local_quessor_submission:status'] = 'The evaluation status returned by Quessor.';
 $string['privacy:metadata:local_quessor_submission:grade'] = 'The grade returned by Quessor.';
 $string['privacy:metadata:local_quessor_submission:feedback'] = 'The feedback returned by Quessor.';
-$string['privacy:metadata:quessor'] = 'Teacher identity and student submission content are sent to the Quessor API for evaluation.';
+$string['privacy:metadata:quessor'] = 'After the site administrator enables the integration, site name and institution contact email are sent for registration. For each activity a teacher connects, the teacher identity, activity/course context, visible learner roster, and submission text/files may be sent to Quessor for evaluation. Automatic submission sync is limited to connected activities.';
 $string['privacy:metadata:quessor:userid'] = 'The Moodle user id of the teacher or student.';
 $string['privacy:metadata:quessor:email'] = 'The Moodle email address of the teacher or student.';
 $string['privacy:metadata:quessor:studentname'] = 'The student name shown in the evaluation.';

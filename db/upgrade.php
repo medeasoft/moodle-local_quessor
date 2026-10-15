@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -49,7 +65,14 @@ function xmldb_local_quessor_upgrade(int $oldversion): bool {
     if ($oldversion < 2026080404) {
         $table = new xmldb_table('local_quessor_submission');
         $activitytype = new xmldb_field(
-            'activitytype', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'assign', 'cmid',
+            'activitytype',
+            XMLDB_TYPE_CHAR,
+            '20',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            'assign',
+            'cmid',
         );
         if (!$dbman->field_exists($table, $activitytype)) {
             $dbman->add_field($table, $activitytype);

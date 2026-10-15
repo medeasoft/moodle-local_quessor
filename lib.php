@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -32,28 +48,11 @@ function local_quessor_prepare_embed(string $url, string $iframeid): void {
         return;
     }
 
-    $PAGE->requires->js_init_code(
-        '(function() {'
-        . 'var frame = document.getElementById(' . json_encode($iframeid) . ');'
-        . 'var fallback = document.getElementById(' . json_encode($iframeid . '-fallback') . ');'
-        . 'var expectedOrigin = ' . json_encode($origin) . ';'
-        . 'if (!frame) return;'
-        . 'function showFallback() {'
-        . 'if (fallback) fallback.classList.remove("d-none");'
-        . 'frame.classList.add("d-none");'
-        . '}'
-        . 'window.addEventListener("message", function(event) {'
-        . 'if (event.source !== frame.contentWindow || event.origin !== expectedOrigin) return;'
-        . 'if (!event.data || event.data.type !== "quessor:moodle-reauth" || frame.dataset.reauth === "1") return;'
-        . 'frame.dataset.reauth = "1"; window.location.reload();'
-        . '});'
-        . 'document.addEventListener("securitypolicyviolation", function(event) {'
-        . 'var dir = String(event.effectiveDirective || event.violatedDirective || "");'
-        . 'if (dir.indexOf("frame-src") === -1 && dir.indexOf("child-src") === -1 && dir.indexOf("default-src") === -1) return;'
-        . 'if (String(event.blockedURI || "").indexOf(expectedOrigin) === 0) showFallback();'
-        . '});'
-        . '})();'
-    );
+    $PAGE->requires->js_call_amd('local_quessor/embed', 'init', [
+        $iframeid,
+        $iframeid . '-fallback',
+        $origin,
+    ]);
 }
 
 function local_quessor_render_embed(string $url, string $iframeid, string $title, string $minheight = '210px'): void {
@@ -83,12 +82,15 @@ function local_quessor_render_embed(string $url, string $iframeid, string $title
 }
 
 /** Mount the full same-origin Quessor evaluation wizard without an iframe. */
-function local_quessor_render_native_evaluation(int $cmid, bool $questionSourceAttached = false): void {
+function local_quessor_render_native_evaluation(int $cmid, bool $questionsourceattached = false): void {
+    global $PAGE;
+
+    $PAGE->requires->js_call_amd('local_quessor/native_services', 'init');
     $config = [
         'endpoint' => (new moodle_url('/local/quessor/ajax.php'))->out(false),
         'cmid' => $cmid,
         'sesskey' => sesskey(),
-        'questionSourceAttached' => $questionSourceAttached,
+        'questionSourceAttached' => $questionsourceattached,
         'locale' => str_starts_with(current_language(), 'tr') ? 'tr' : 'en',
         'labels' => [
             'loading' => get_string('native_loading', 'local_quessor'),
@@ -276,7 +278,7 @@ function local_quessor_render_native_evaluation(int $cmid, bool $questionSourceA
         'context' => trim((string)($payload['courseContext'] ?? '')) ?: null,
         'readyCount' => count($ready),
         'completedCount' => $completed,
-        'submissions' => array_values(array_map(static function($record) use ($users, $statuslabels): array {
+        'submissions' => array_values(array_map(static function ($record) use ($users, $statuslabels): array {
             $user = $users[(int)$record->userid] ?? null;
             return [
                 'id' => (string)$record->id,
@@ -355,10 +357,12 @@ function local_quessor_render_native_evaluation(int $cmid, bool $questionSourceA
     echo html_writer::tag('strong', format_float((float)$payload['maxScore'], 2), ['class' => 'local-quessor-native-score']);
     echo html_writer::tag('span', get_string('native_points', 'local_quessor'), ['class' => 'local-quessor-native-card__muted']);
     echo html_writer::end_div();
-    foreach ([
+    foreach (
+        [
         ['native_criteria_label', (string)($payload['rubric'] ?? ''), 'native_no_criteria'],
         ['native_context_label', (string)($payload['courseContext'] ?? ''), 'native_no_context'],
-    ] as [$label, $value, $empty]) {
+        ] as [$label, $value, $empty]
+    ) {
         echo html_writer::start_div('local-quessor-native-card local-quessor-native-card--wide');
         echo html_writer::tag('span', get_string($label, 'local_quessor'), ['class' => 'local-quessor-native-card__eyebrow']);
         echo html_writer::tag('div', trim($value) !== '' ? format_text($value, FORMAT_PLAIN) : get_string($empty, 'local_quessor'), ['class' => 'local-quessor-native-card__body']);
@@ -399,7 +403,7 @@ function local_quessor_render_native_evaluation(int $cmid, bool $questionSourceA
     echo html_writer::link($wizardurl, get_string('openinnewtab', 'local_quessor'), ['class' => 'btn btn-outline-secondary', 'target' => '_blank', 'rel' => 'noopener']);
     echo html_writer::end_div() . html_writer::end_div() . html_writer::end_div();
 
-    $PAGE->requires->js_init_code("(() => { const root = document.querySelector('[data-native-evaluation]'); if (!root) return; const tabs = root.querySelectorAll('[data-native-tab]'); const panels = root.querySelectorAll('[data-native-panel]'); const steps = root.querySelectorAll('[data-native-step]'); const fill = root.querySelector('.local-quessor-native__progress-fill'); const activate = (name) => { const target = root.querySelector('[data-native-tab=\"' + name + '\"]'); if (target) target.click(); }; steps.forEach((step) => step.addEventListener('click', () => activate(step.dataset.nativeStep))); tabs.forEach((tab) => tab.addEventListener('click', () => { const name = tab.dataset.nativeTab; tabs.forEach((item) => { const active = item === tab; item.classList.toggle('is-active', active); item.setAttribute('aria-selected', active ? 'true' : 'false'); }); steps.forEach((step) => { const active = step.dataset.nativeStep === name; step.classList.toggle('is-active', active); step.classList.toggle('is-complete', name === 'preview' && step.dataset.nativeStep === 'questions'); }); panels.forEach((panel) => { const active = panel.dataset.nativePanel === name; panel.classList.toggle('is-active', active); panel.hidden = !active; }); if (fill) fill.style.width = name === 'preview' ? '100%' : '0%'; })); })();");
+    $PAGE->requires->js_call_amd('local_quessor/native_tabs', 'init');
 }
 
 /**
@@ -454,8 +458,10 @@ function local_quessor_extend_settings_navigation(settings_navigation $settingsn
     }
 
     $coursecontext = context_course::instance($cm->course);
-    if (!has_capability('local/quessor:gradeassignments', $coursecontext)
-        || !\local_quessor\local\activity_service::can_grade($cm, $cm->context)) {
+    if (
+        !has_capability('local/quessor:gradeassignments', $coursecontext)
+        || !\local_quessor\local\activity_service::can_grade($cm, $cm->context)
+    ) {
         return;
     }
 

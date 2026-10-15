@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor\local;
 
@@ -47,35 +63,29 @@ class api_client {
         return trim((string)($CFG->supportemail ?? ''));
     }
 
-    /** Convert Quessor API errors into messages that are useful in Moodle notifications. */
-    private function format_api_error(int $httpcode, string $curlerror, string $response): string {
+    /** Throw translated user errors and keep transport details in developer logs only. */
+    private function throw_api_error(int $httpcode, string $curlerror, string $response): never {
         $decoded = json_decode($response, true);
         $apierrors = is_array($decoded) ? ($decoded['error']['errors'] ?? []) : [];
         $apierror = is_array($apierrors) && isset($apierrors[0]) && is_string($apierrors[0])
             ? trim($apierrors[0])
             : '';
 
-        if (preg_match(
-            '/Insufficient credits\. This operation requires ([0-9]+(?:\.[0-9]+)?) credits, but you have ([0-9]+(?:\.[0-9]+)?) available\./i',
-            $apierror,
-            $matches,
-        )) {
-            return get_string('insufficientcredits', 'local_quessor', [
+        if (
+            preg_match(
+                '/Insufficient credits\. This operation requires ([0-9]+(?:\.[0-9]+)?) credits, but you have ([0-9]+(?:\.[0-9]+)?) available\./i',
+                $apierror,
+                $matches,
+            )
+        ) {
+            throw new \moodle_exception('insufficientcredits', 'local_quessor', '', [
                 'required' => $matches[1],
                 'available' => $matches[2],
             ]);
         }
 
-        if ($apierror !== '') {
-            return 'Quessor API request failed (' . $httpcode . '): ' . $apierror;
-        }
-
-        $detail = trim(preg_replace('/\s+/', ' ', strip_tags($response)));
-        $message = 'Quessor API request failed (' . $httpcode . '): ' . $curlerror;
-        if ($detail !== '') {
-            $message .= ($curlerror ? ' ' : '') . substr($detail, 0, 500);
-        }
-        return $message;
+        debugging('Quessor API request failed (' . $httpcode . '): ' . $curlerror, DEBUG_DEVELOPER);
+        throw new \moodle_exception('apierror', 'local_quessor', '', $httpcode);
     }
 
     public function submit(array $payload, array $files): array {
@@ -93,7 +103,7 @@ class api_client {
             foreach ($files as $index => $file) {
                 $tempfile = $file->copy_content_to_temp('local_quessor');
                 if (!$tempfile) {
-                    throw new \moodle_exception('error', 'core', '', null, 'Unable to prepare a Moodle submission file.');
+                    throw new \moodle_exception('configurationrequired', 'local_quessor');
                 }
                 $tempfiles[] = $tempfile;
                 $postfields['files[' . $index . ']'] = new \CURLFile(
@@ -133,12 +143,15 @@ class api_client {
 
     /** Exchange the one-time handoff without exposing Quessor tokens to browser JavaScript. */
     public function exchange_sso_url(string $url): array {
+        if (!get_config('local_quessor', 'enabled')) {
+            throw new \moodle_exception('integrationdisabled', 'local_quessor');
+        }
         $query = parse_url($url, PHP_URL_QUERY);
         $params = [];
         parse_str((string)$query, $params);
         $token = trim((string)($params['token'] ?? ''));
         if ($token === '') {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Quessor SSO handoff token is missing.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         return $this->send_request(
@@ -165,6 +178,9 @@ class api_client {
         bool $multipart = false,
         int $timeout = 90,
     ): array {
+        if (!get_config('local_quessor', 'enabled')) {
+            throw new \moodle_exception('integrationdisabled', 'local_quessor');
+        }
         $method = strtoupper($method);
         if (!in_array($method, ['GET', 'POST', 'PUT', 'DELETE'], true)) {
             throw new \invalid_parameter_exception('Unsupported Quessor proxy method.');
@@ -172,19 +188,23 @@ class api_client {
         $decodedpath = (string)(parse_url($path, PHP_URL_PATH) ?? '');
         for ($pass = 0; $pass < 3; $pass++) {
             $next = rawurldecode($decodedpath);
-            if ($next === $decodedpath) break;
+            if ($next === $decodedpath) {
+                break;
+            }
             $decodedpath = $next;
         }
-        if (!str_starts_with($path, '/')
+        if (
+            !str_starts_with($path, '/')
             || str_contains($path, '://')
             || preg_match('/[\x00-\x1F\x7F]/', $path)
             || str_contains($decodedpath, '\\')
-            || preg_match('#(?:^|/)\.{1,2}(?:/|$)#', $decodedpath)) {
+            || preg_match('#(?:^|/)\.{1,2}(?:/|$)#', $decodedpath)
+        ) {
             throw new \invalid_parameter_exception('Invalid Quessor proxy path.');
         }
         $accesstoken = trim($accesstoken);
         if ($accesstoken === '') {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Quessor native session is missing.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         $headers = [
@@ -196,38 +216,32 @@ class api_client {
             $headers[] = 'Content-Type: application/json';
         }
 
+        global $CFG;
+        require_once($CFG->libdir . '/filelib.php');
         $apipath = str_starts_with($path, '/api/') ? $path : '/api' . $path;
-        $curl = curl_init($this->apiurl . $apipath);
-        $options = [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_CUSTOMREQUEST => $method,
-            CURLOPT_ENCODING => '',
-        ];
-        if ($body !== null && $method !== 'GET') {
-            $options[CURLOPT_POSTFIELDS] = $body;
-        }
-        curl_setopt_array($curl, $options);
-        $response = curl_exec($curl);
-        $httpcode = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        $error = curl_error($curl);
-        curl_close($curl);
+        $url = $this->apiurl . $apipath;
+        $moodlecurl = new \curl(['proxy' => true]);
+        $moodlecurl->setHeader($headers);
+        $options = ['CURLOPT_TIMEOUT' => $timeout];
+        $response = match ($method) {
+            'GET' => $moodlecurl->get($url, [], $options),
+            'POST' => $moodlecurl->post($url, $body ?? '', $options),
+            'PUT' => $moodlecurl->put($url, $body ?? '', $options),
+            'DELETE' => $moodlecurl->delete($url, $body ?? '', $options),
+            default => throw new \invalid_parameter_exception('Unsupported Quessor proxy method.'),
+        };
+        $info = $moodlecurl->get_info();
+        $httpcode = (int)($info['http_code'] ?? 0);
+        $error = (string)$moodlecurl->error;
 
         if ($response === false || $httpcode < 200 || $httpcode >= 300) {
-            throw new \moodle_exception(
-                'error',
-                'core',
-                '',
-                null,
-                $this->format_api_error($httpcode, $error, (string)$response),
-            );
+            $this->throw_api_error($httpcode, $error, (string)$response);
         }
 
         $decoded = json_decode((string)$response, true);
         if (!is_array($decoded)) {
             $detail = trim(preg_replace('/\s+/', ' ', strip_tags(substr((string)$response, 0, 160))));
-            throw new \moodle_exception('error', 'core', '', null, 'Quessor API returned an invalid response. ' . $detail);
+            throw new \moodle_exception('apiresponseinvalid', 'local_quessor');
         }
         return array_key_exists('data', $decoded)
             ? $decoded
@@ -320,6 +334,9 @@ class api_client {
         bool $json = false,
         int $timeout = 90,
     ): array {
+        if (!get_config('local_quessor', 'enabled')) {
+            throw new \moodle_exception('integrationdisabled', 'local_quessor');
+        }
         $this->ensure_registered();
         try {
             $result = $this->send_request($method, $path, $postfields, $json, $timeout, true);
@@ -437,14 +454,14 @@ class api_client {
 
         $privatekey = '';
         if (!function_exists('openssl_pkey_new')) {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'PHP OpenSSL is required.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
         $key = openssl_pkey_new([
             'private_key_bits' => 2048,
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
         ]);
         if ($key === false || !openssl_pkey_export($key, $privatekey)) {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Unable to create Moodle integration key.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
         $this->persist_privatekey($privatekey);
 
@@ -455,7 +472,7 @@ class api_client {
         $key = openssl_pkey_get_private($privatekey);
         $details = $key === false ? false : openssl_pkey_get_details($key);
         if (!is_array($details) || empty($details['key']) || ($details['type'] ?? null) !== OPENSSL_KEYTYPE_RSA) {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Moodle integration key is invalid.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         $this->privatekey = $privatekey;
@@ -489,7 +506,7 @@ class api_client {
         $signature = '';
         $key = openssl_pkey_get_private($this->privatekey);
         if ($key === false || !openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256)) {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Unable to sign Moodle integration request.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
         return base64_encode($signature);
     }
@@ -522,48 +539,26 @@ class api_client {
 
         $url = $this->apiurl . $path;
         $multipart = is_array($postfields);
-        if ($multipart) {
-            $curl = curl_init($url);
-            curl_setopt_array($curl, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => $timeout,
-                CURLOPT_HTTPHEADER => $headers,
-            ]);
-            if ($method === 'POST') {
-                curl_setopt($curl, CURLOPT_POST, true);
-                curl_setopt($curl, CURLOPT_POSTFIELDS, $postfields);
-            }
-            $response = curl_exec($curl);
-            $httpcode = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-            $error = curl_error($curl);
-            curl_close($curl);
-        } else {
-            global $CFG;
-            require_once($CFG->libdir . '/filelib.php');
-            $moodlecurl = new \curl();
-            $moodlecurl->setHeader($headers);
-            $options = ['CURLOPT_TIMEOUT' => $timeout];
-            if ($method === 'POST') {
-                $response = $moodlecurl->post($url, $postfields ?? '', $options);
-            } else {
-                $response = $moodlecurl->get($url, [], $options);
-            }
-            $info = $moodlecurl->get_info();
-            $httpcode = (int)($info['http_code'] ?? 0);
-            $error = (string)$moodlecurl->error;
-        }
+        global $CFG;
+        require_once($CFG->libdir . '/filelib.php');
+        $moodlecurl = new \curl(['proxy' => true]);
+        $moodlecurl->setHeader($headers);
+        $options = ['CURLOPT_TIMEOUT' => $timeout];
+        $response = match (strtoupper($method)) {
+            'POST' => $moodlecurl->post($url, $postfields ?? '', $options),
+            'PUT' => $moodlecurl->put($url, $postfields ?? '', $options),
+            'DELETE' => $moodlecurl->delete($url, $postfields ?? '', $options),
+            default => $moodlecurl->get($url, [], $options),
+        };
+        $info = $moodlecurl->get_info();
+        $httpcode = (int)($info['http_code'] ?? 0);
+        $error = (string)$moodlecurl->error;
         if ($response === false || $httpcode < 200 || $httpcode >= 300) {
-            throw new \moodle_exception(
-                'error',
-                'core',
-                '',
-                null,
-                $this->format_api_error($httpcode, $error, (string)$response),
-            );
+            $this->throw_api_error($httpcode, $error, (string)$response);
         }
         $decoded = json_decode((string)$response, true);
         if (!is_array($decoded) || !array_key_exists('data', $decoded)) {
-            throw new \moodle_exception('error', 'core', '', null, 'Quessor API returned an invalid response.');
+            throw new \moodle_exception('apiresponseinvalid', 'local_quessor');
         }
         return $decoded['data'];
     }

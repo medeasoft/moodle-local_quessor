@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 define('AJAX_SCRIPT', true);
 
@@ -13,85 +29,16 @@ require_sesskey();
 
 [$course, $cm, $context] = activity_service::load($cmid);
 native_session::require_access($course, $cm, $context);
+if (!activity_service::is_connected($cmid)) {
+    throw new moodle_exception('activitynotconnected', 'local_quessor');
+}
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private');
 
 try {
-    if ($action === 'bootstrap') {
-        $session = native_session::bootstrap($cmid);
-        $instance = $DB->get_record($cm->modname, ['id' => $cm->instance], '*', MUST_EXIST);
-        $activityitems = activity_service::submissions($course, $cm, $context, $instance);
-        $expectedready = count(array_filter(
-            $activityitems,
-            static fn(array $item): bool => ($item['state'] ?? '') === 'ready',
-        ));
-        echo json_encode([
-            'data' => [
-                'examId' => $session['examid'],
-                'courseId' => $session['courseid'],
-                'availablePages' => $session['availablepages'],
-                'instituteName' => $session['institutename'],
-                'questionExtractionPaperId' => $session['questionextractionpaperid'] ?? null,
-                'questionExtractionStatus' => $session['questionextractionstatus'] ?? null,
-                'submissions' => native_session::submission_summary($cmid),
-                'expectedReadySubmissions' => $expectedready,
-            ],
-            'statusCode' => 200,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    if ($action === 'start_evaluation') {
-        if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
-            throw new invalid_parameter_exception('Quessor evaluation must be started with POST.');
-        }
-        echo json_encode([
-            'data' => native_session::start_evaluation($cmid),
-            'statusCode' => 200,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    if ($action === 'retry_question_extraction') {
-        if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
-            throw new invalid_parameter_exception('Question extraction retry must be started with POST.');
-        }
-        echo json_encode([
-            'data' => native_session::retry_question_extraction($cmid),
-            'statusCode' => 200,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    if ($action === 'refresh_grades') {
-        if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
-            throw new invalid_parameter_exception('Quessor grades must be refreshed with POST.');
-        }
-        echo json_encode([
-            'data' => native_session::refresh_submission_statuses($cmid),
-            'statusCode' => 200,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    if ($action === 'publish_grades') {
-        if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
-            throw new invalid_parameter_exception('Quessor grades must be published with POST.');
-        }
-        $raw = file_get_contents('php://input');
-        $decoded = json_decode($raw === false ? '' : $raw, true);
-        $ids = is_array($decoded) && is_array($decoded['ids'] ?? null) ? $decoded['ids'] : [];
-        $includefeedback = is_array($decoded) && ($decoded['includeFeedback'] ?? false) === true;
-        echo json_encode([
-            'data' => native_session::publish_grades($cmid, array_map('strval', $ids), $includefeedback),
-            'statusCode' => 200,
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
     if ($action !== 'proxy') {
-        throw new invalid_parameter_exception('Unsupported Quessor native action.');
+        throw new invalid_parameter_exception('Unsupported Quessor upload action.');
     }
 
     $method = strtoupper(required_param('method', PARAM_ALPHA));
@@ -106,7 +53,9 @@ try {
         foreach ($_FILES as $name => $file) {
             if (is_array($file['tmp_name'] ?? null)) {
                 foreach ($file['tmp_name'] as $index => $tmpname) {
-                    if (($file['error'][$index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) continue;
+                    if (($file['error'][$index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                        continue;
+                    }
                     $body[$name . '[' . $index . ']'] = new CURLFile(
                         $tmpname,
                         (string)($file['type'][$index] ?? 'application/octet-stream'),
@@ -122,11 +71,10 @@ try {
             }
         }
     } else {
-        $rawbody = file_get_contents('php://input');
-        $body = $rawbody === false || trim($rawbody) === '' ? null : $rawbody;
+        throw new invalid_parameter_exception('Only multipart uploads are accepted by this endpoint.');
     }
 
-    $response = native_session::proxy($cmid, $method, $path, $body, $multipart);
+    $response = native_session::proxy($cmid, $method, $path, $body, true);
     echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
     $status = $exception instanceof required_capability_exception ? 403 : 400;

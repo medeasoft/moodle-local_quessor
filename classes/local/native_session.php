@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor\local;
 
@@ -17,6 +33,9 @@ final class native_session {
 
     public static function bootstrap(int $cmid, bool $force = false): array {
         global $SESSION, $USER;
+        if (!activity_service::is_connected($cmid)) {
+            throw new \moodle_exception('activitynotconnected', 'local_quessor');
+        }
 
         $key = (string)$cmid;
         $sessions = (array)($SESSION->{self::SESSION_KEY} ?? []);
@@ -26,13 +45,15 @@ final class native_session {
             [, , , $currentinstance] = activity_service::load($cmid);
             $activitysignature = self::activity_signature($currentinstance);
         }
-        if (!$force
+        if (
+            !$force
             && $existing
             && (int)($existing['userid'] ?? 0) === (int)$USER->id
             && (int)($existing['expiresat'] ?? 0) > time() + 60
             && trim((string)($existing['accesstoken'] ?? '')) !== ''
             && array_key_exists('questionextractionpaperid', $existing)
-            && ($existing['activitysignature'] ?? null) === $activitysignature) {
+            && ($existing['activitysignature'] ?? null) === $activitysignature
+        ) {
             return $existing;
         }
 
@@ -56,20 +77,20 @@ final class native_session {
         $examid = trim((string)($prepared['examId'] ?? ''));
         $wizardurl = trim((string)($prepared['wizardUrl'] ?? ''));
         if ($examid === '' || $wizardurl === '') {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Quessor native bootstrap is incomplete.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         $tokens = $client->exchange_sso_url($wizardurl);
         $accesstoken = trim((string)($tokens['accessToken'] ?? ''));
         if ($accesstoken === '') {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Quessor access token is missing.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         $examresponse = $client->authenticated_request('GET', '/exams/' . rawurlencode($examid), $accesstoken);
         $exam = (array)($examresponse['data'] ?? []);
         $courseid = trim((string)($exam['courseId'] ?? ''));
         if ($courseid === '') {
-            throw new \moodle_exception('configurationrequired', 'local_quessor', '', null, 'Quessor exam course is missing.');
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         $session = [
@@ -152,13 +173,7 @@ final class native_session {
 
         $moodleassignmentid = activity_service::backend_activity_id($cm);
         if (trim($moodleassignmentid) === '') {
-            throw new \moodle_exception(
-                'configurationrequired',
-                'local_quessor',
-                '',
-                null,
-                'Quessor Moodle activity id is missing.',
-            );
+            throw new \moodle_exception('configurationrequired', 'local_quessor');
         }
 
         return (new api_client())->start_evaluation($moodleassignmentid);
@@ -233,7 +248,6 @@ final class native_session {
                 $record->timemodified = time();
                 $DB->update_record('local_quessor_submission', $record);
                 $updated++;
-
             }
         }
 
@@ -255,14 +269,20 @@ final class native_session {
             ['cmid' => $cmid, 'superseded' => 'superseded'],
         );
         if (array_filter($records, static fn(\stdClass $record): bool => $record->status === 'evaluating')) {
-            throw new \moodle_exception('error', 'core', '', null,
-                'Değerlendirme devam ediyor. Değerlendirme tamamlanmadan notlar Moodle’a gönderilemez.');
+            throw new \moodle_exception('evaluationinprogress', 'local_quessor');
         }
         $selected = array_fill_keys(array_map('strval', $ids), true);
         $updated = 0;
         foreach ($records as $record) {
-            if ($record->status !== 'completed' || $record->grade === null) continue;
-            if ($selected && !isset($selected[(string)$record->id])) continue;
+            if ($record->status !== 'completed' || $record->grade === null) {
+                continue;
+            }
+            if (!activity_service::can_access_student((int)$course->id, (int)$record->userid)) {
+                continue;
+            }
+            if ($selected && !isset($selected[(string)$record->id])) {
+                continue;
+            }
             $feedback = $includefeedback ? (string)($record->feedback ?? '') : null;
             activity_service::sync_grade($cmid, (int)$record->userid, (float)$record->grade, $feedback);
             $updated++;
@@ -282,6 +302,7 @@ final class native_session {
      */
     public static function submission_summary(int $cmid): array {
         global $DB;
+        [$course] = activity_service::load($cmid);
 
         $summary = [
             'total' => 0,
@@ -313,6 +334,9 @@ final class native_session {
             );
         }
         foreach ($records as $record) {
+            if (!activity_service::can_access_student((int)$course->id, (int)$record->userid)) {
+                continue;
+            }
             $summary['total']++;
             $status = (string)$record->status;
             if (array_key_exists($status, $summary) && $status !== 'total') {
@@ -339,10 +363,12 @@ final class native_session {
         global $SESSION, $USER;
         $media = (array)($SESSION->{self::MEDIA_SESSION_KEY} ?? []);
         $entry = isset($media[$key]) ? (array)$media[$key] : null;
-        if (!$entry
+        if (
+            !$entry
             || (int)($entry['cmid'] ?? 0) !== $cmid
             || (int)($entry['userid'] ?? 0) !== (int)$USER->id
-            || (int)($entry['expiresat'] ?? 0) < time()) {
+            || (int)($entry['expiresat'] ?? 0) < time()
+        ) {
             throw new \moodle_exception('invalidparameter', 'error');
         }
         $url = trim((string)($entry['url'] ?? ''));
@@ -412,11 +438,13 @@ final class native_session {
         } else if ($route === '/program-outcomes' || $route === '/course-objectives') {
             $allowed = ($method === 'GET' && self::query_parameter_equals($path, 'courseId', $courseid))
                 || ($method === 'POST' && self::body_field_equals($body, 'courseId', $courseid));
-        } else if (in_array($route, [
+        } else if (
+            in_array($route, [
             '/program-outcomes/exam/' . $examid . '/mappings',
             '/course-objectives/exam/' . $examid . '/mappings',
             '/course-objectives/course/' . $courseid . '/po-mappings',
-        ], true)) {
+            ], true)
+        ) {
             $allowed = in_array($method, ['GET', 'POST'], true);
         }
 
@@ -447,7 +475,9 @@ final class native_session {
             }
             $index = (int)($matches[1] !== '' ? $matches[1] : $matches[2]);
             $property = $matches[3] !== '' ? $matches[3] : $matches[4];
-            if (!in_array($property, ['field', 'operator', 'value'], true)) continue;
+            if (!in_array($property, ['field', 'operator', 'value'], true)) {
+                continue;
+            }
             $value = urldecode($rawvalue);
             if (isset($filters[$index][$property]) && $filters[$index][$property] !== $value) {
                 return false;
@@ -455,9 +485,11 @@ final class native_session {
             $filters[$index][$property] = $value;
         }
         foreach ($filters as $filter) {
-            if (($filter['field'] ?? null) === $field
+            if (
+                ($filter['field'] ?? null) === $field
                 && ($filter['operator'] ?? null) === 'eq'
-                && (string)($filter['value'] ?? '') === $expected) {
+                && (string)($filter['value'] ?? '') === $expected
+            ) {
                 return true;
             }
         }
@@ -476,8 +508,12 @@ final class native_session {
     }
 
     private static function decoded_body(mixed $body): array {
-        if (is_array($body)) return $body;
-        if (!is_string($body) || trim($body) === '') return [];
+        if (is_array($body)) {
+            return $body;
+        }
+        if (!is_string($body) || trim($body) === '') {
+            return [];
+        }
         $decoded = json_decode($body, true);
         return is_array($decoded) ? $decoded : [];
     }
@@ -492,7 +528,9 @@ final class native_session {
         $response = $client->authenticated_request('GET', $path, $token);
         $value = $response['data'] ?? null;
         foreach (explode('.', $fieldpath) as $field) {
-            if (!is_array($value) || !array_key_exists($field, $value)) return false;
+            if (!is_array($value) || !array_key_exists($field, $value)) {
+                return false;
+            }
             $value = $value[$field];
         }
         return (string)$value === $expected;
@@ -505,8 +543,10 @@ final class native_session {
         string $examid,
     ): void {
         $questionid = trim((string)(self::decoded_body($body)['questionId'] ?? ''));
-        if ($questionid !== ''
-            && !self::remote_item_matches_scope($client, $token, '/questions/' . rawurlencode($questionid), 'examId', $examid)) {
+        if (
+            $questionid !== ''
+            && !self::remote_item_matches_scope($client, $token, '/questions/' . rawurlencode($questionid), 'examId', $examid)
+        ) {
             throw new \invalid_parameter_exception('Question is outside the Moodle activity scope.');
         }
     }
@@ -524,7 +564,9 @@ final class native_session {
 
     private static function jwt_expiry(string $token): int {
         $parts = explode('.', $token);
-        if (count($parts) !== 3) return time() + 5 * MINSECS;
+        if (count($parts) !== 3) {
+            return time() + 5 * MINSECS;
+        }
         $payload = strtr($parts[1], '-_', '+/');
         $payload .= str_repeat('=', (4 - strlen($payload) % 4) % 4);
         $decoded = json_decode((string)base64_decode($payload, true), true);
@@ -538,7 +580,7 @@ final class native_session {
         $allowgenericurl = str_starts_with($route, '/exams/pages/') && str_ends_with($route, '/url');
         $media = (array)($SESSION->{self::MEDIA_SESSION_KEY} ?? []);
 
-        $rewrite = static function(mixed $value, ?string $field = null) use (&$rewrite, &$media, $cmid, $USER, $allowgenericurl): mixed {
+        $rewrite = static function (mixed $value, ?string $field = null) use (&$rewrite, &$media, $cmid, $USER, $allowgenericurl): mixed {
             if (is_array($value)) {
                 foreach ($value as $key => $child) {
                     $value[$key] = $rewrite($child, is_string($key) ? $key : null);
@@ -546,7 +588,9 @@ final class native_session {
                 return $value;
             }
             $ismediafield = $field === 'imageUrl' || ($field === 'url' && $allowgenericurl);
-            if (!$ismediafield || !is_string($value) || !preg_match('#^https?://#i', $value)) return $value;
+            if (!$ismediafield || !is_string($value) || !preg_match('#^https?://#i', $value)) {
+                return $value;
+            }
 
             $key = bin2hex(random_bytes(24));
             $media[$key] = [
@@ -560,7 +604,9 @@ final class native_session {
 
         $rewritten = $rewrite($response);
         foreach ($media as $key => $entry) {
-            if ((int)(((array)$entry)['expiresat'] ?? 0) < time()) unset($media[$key]);
+            if ((int)(((array)$entry)['expiresat'] ?? 0) < time()) {
+                unset($media[$key]);
+            }
         }
         $SESSION->{self::MEDIA_SESSION_KEY} = $media;
         return $rewritten;

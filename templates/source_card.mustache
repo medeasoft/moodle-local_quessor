@@ -1,0 +1,29 @@
+{{!
+    This file is part of Moodle - http://moodle.org/.
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    @copyright 2026 Medeasoft
+    @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+}}
+<details class="local-quessor-source-card mb-3">
+    <summary class="local-quessor-source-card__summary">
+        <span class="local-quessor-source-card__icon" aria-hidden="true"><i class="fa fa-question-circle"></i></span>
+        <span class="local-quessor-source-card__title">{{title}}</span>
+        <span class="local-quessor-source-card__chevron" aria-hidden="true"><i class="fa fa-chevron-down"></i></span>
+    </summary>
+    <div class="local-quessor-source-card__content">
+        <p class="local-quessor-source-card__intro">{{intro}}</p>
+        <div class="local-quessor-source-card__grid">
+            {{#sources}}
+                <div class="local-quessor-source-card__item">
+                    <strong class="local-quessor-source-card__label">{{label}}</strong>
+                    <span class="local-quessor-source-card__value">{{description}}</span>
+                </div>
+            {{/sources}}
+        </div>
+    </div>
+</details>

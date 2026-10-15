@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor\local;
 
@@ -12,6 +28,19 @@ defined('MOODLE_INTERNAL') || die();
  */
 final class activity_service {
     public const SUPPORTED_TYPES = ['assign', 'quiz', 'workshop', 'forum'];
+
+    /** Persist explicit teacher consent for syncing this activity's submissions. */
+    public static function connect(int $cmid): void {
+        $connected = json_decode((string)get_config('local_quessor', 'connectedactivities'), true);
+        $connected = is_array($connected) ? array_map('intval', $connected) : [];
+        $connected[] = $cmid;
+        set_config('connectedactivities', json_encode(array_values(array_unique($connected))), 'local_quessor');
+    }
+
+    public static function is_connected(int $cmid): bool {
+        $connected = json_decode((string)get_config('local_quessor', 'connectedactivities'), true);
+        return is_array($connected) && in_array($cmid, array_map('intval', $connected), true);
+    }
 
     public static function load(int $cmid): array {
         global $DB;
@@ -40,6 +69,22 @@ final class activity_service {
             'forum' => 'mod/forum:grade',
         ];
         return has_capability($capabilities[$cm->modname], $context);
+    }
+
+    /** Respect separate-group visibility when handling student records. */
+    public static function can_access_student(int $courseid, int $userid): bool {
+        global $USER;
+        $coursecontext = \context_course::instance($courseid);
+        $course = get_course($courseid);
+        if (
+            $userid === (int)$USER->id || (int)groups_get_course_groupmode($course) !== SEPARATEGROUPS
+            || has_capability('moodle/site:accessallgroups', $coursecontext)
+        ) {
+            return true;
+        }
+        $teachergroups = groups_get_user_groups($courseid, (int)$USER->id)[0] ?? [];
+        $studentgroups = groups_get_user_groups($courseid, $userid)[0] ?? [];
+        return (bool)array_intersect($teachergroups, $studentgroups);
     }
 
     /**
@@ -155,7 +200,7 @@ final class activity_service {
             ];
         }
 
-        uasort($assignments, static function(array $left, array $right): int {
+        uasort($assignments, static function (array $left, array $right): int {
             return strnatcasecmp($left['name'], $right['name']);
         });
         return $assignments;
@@ -212,10 +257,10 @@ final class activity_service {
         foreach ($stored as $file) {
             $result = assignment_service::prepare_question_file($file, $converter);
             if ($result['state'] === 'pending') {
-                throw new \moodle_exception('error', 'core', '', null, 'Moodle kaynak dosyası hâlâ dönüştürülüyor: ' . $file->get_filename());
+                throw new \moodle_exception('conversionpendingfile', 'local_quessor', '', $file->get_filename());
             }
             if ($result['state'] !== 'ready') {
-                throw new \moodle_exception('error', 'core', '', null, 'Moodle kaynak dosyası desteklenmiyor: ' . $file->get_filename());
+                throw new \moodle_exception('conversionunsupportedfile', 'local_quessor', '', $file->get_filename());
             }
             $prepared[] = $result['file'];
         }
@@ -267,65 +312,115 @@ final class activity_service {
     public static function sync_grade(int $cmid, int $userid, float $grade, ?string $feedback): void {
         global $CFG, $DB;
         [$course, $cm, $context, $instance] = self::load($cmid);
-        $gradebookgrade = $grade;
+        if (!self::can_grade($cm, $context) || !self::can_access_student((int)$course->id, $userid)) {
+            throw new \required_capability_exception($context, 'local/quessor:gradeassignments', 'nopermissions', '');
+        }
         if ($cm->modname === 'assign') {
             assignment_service::sync_grade($cmid, $userid, $grade, $feedback);
             return;
         }
         if ($cm->modname === 'quiz') {
-            $cap = (float)$instance->grade;
-            $gradebookgrade = $cap > 0 ? min($cap, max(0, $grade)) : max(0, $grade);
-            $existinggrade = $DB->get_record('quiz_grades', ['quiz' => $instance->id, 'userid' => $userid]);
-            $quizgrade = (object)[
-                'quiz' => $instance->id,
-                'userid' => $userid,
-                'grade' => $gradebookgrade,
-                'timemodified' => time(),
-            ];
-            if ($existinggrade) {
-                $quizgrade->id = $existinggrade->id;
-                $DB->update_record('quiz_grades', $quizgrade);
-            } else {
-                $DB->insert_record('quiz_grades', $quizgrade);
-            }
+            self::sync_quiz_grade($instance, $userid, $grade, $feedback);
+            return;
         } else if ($cm->modname === 'forum') {
-            $existing = $DB->get_record('forum_grades', ['forum' => $instance->id, 'userid' => $userid]);
-            $forumgrade = (object)[
-                'forum' => $instance->id,
-                'userid' => $userid,
-                'grade' => $grade,
-                'timecreated' => $existing->timecreated ?? time(),
-                'timemodified' => time(),
-            ];
-            if ($existing) {
-                $forumgrade->id = $existing->id;
-                $DB->update_record('forum_grades', $forumgrade);
-            } else {
-                $DB->insert_record('forum_grades', $forumgrade);
-            }
+            self::sync_forum_grade($cm, $instance, $userid, $grade, $feedback);
+            return;
         } else if ($cm->modname === 'workshop') {
             $submission = $DB->get_record('workshop_submissions', [
                 'workshopid' => $instance->id,
                 'authorid' => $userid,
             ]);
             if ($submission) {
-                $gradeover = min(100, max(0, $grade / self::max_score($cm, $instance) * 100));
-                $DB->set_field('workshop_submissions', 'gradeover', $gradeover, ['id' => $submission->id]);
-                $DB->set_field('workshop_submissions', 'gradeoverby', get_admin()->id, ['id' => $submission->id]);
+                require_once($CFG->dirroot . '/mod/workshop/locallib.php');
+                $workshop = new \workshop($instance, $cm, $course, $context);
+                $workshop->evaluate_submission(
+                    $submission,
+                    (object)[
+                        'gradeover' => min(self::max_score($cm, $instance), max(0, $grade)),
+                        'feedbackauthor_editor' => [
+                            'text' => $feedback ?? '',
+                            'format' => FORMAT_PLAIN,
+                            'itemid' => 0,
+                        ],
+                    ],
+                    false,
+                    true,
+                );
+                workshop_update_grades($instance, $userid);
             }
+            return;
         }
-        require_once($CFG->libdir . '/gradelib.php');
-        // Activity grade APIs differ considerably. grade_update is the common,
-        // auditable Gradebook boundary and leaves activity-owned attempt data intact.
-        $itemnumber = $cm->modname === 'forum' ? 1 : 0;
-        $gradeitem = ['userid' => $userid, 'rawgrade' => $gradebookgrade];
+    }
+
+    /** Apply Quessor's score to the latest finished attempt using Quiz question grading APIs. */
+    private static function sync_quiz_grade(\stdClass $quiz, int $userid, float $grade, ?string $feedback): void {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+
+        $attempt = $DB->get_record_sql(
+            "SELECT * FROM {quiz_attempts}
+              WHERE quiz = :quizid AND userid = :userid AND state = 'finished' AND preview = 0
+              ORDER BY attempt DESC, timefinish DESC, id DESC",
+            ['quizid' => $quiz->id, 'userid' => $userid],
+            IGNORE_MULTIPLE,
+        );
+        if (!$attempt) {
+            throw new \moodle_exception('quizgradefailed', 'local_quessor');
+        }
+
+        $quizattempt = \mod_quiz\quiz_attempt::create((int)$attempt->id);
+        $usage = $quizattempt->get_question_usage();
+        $slots = $usage->get_slots();
+        $quizmax = (float)$quiz->grade;
+        $sumgrades = (float)$quiz->sumgrades;
+        if (!$slots || $quizmax <= 0 || $sumgrades <= 0) {
+            throw new \moodle_exception('quizgradefailed', 'local_quessor');
+        }
+
+        $target = $sumgrades * min($quizmax, max(0, $grade)) / $quizmax;
+        $totalmaxmark = 0.0;
+        foreach ($slots as $slot) {
+            $totalmaxmark += (float)$usage->get_question_attempt($slot)->get_max_mark();
+        }
+        if ($totalmaxmark <= 0) {
+            throw new \moodle_exception('quizgradefailed', 'local_quessor');
+        }
+
+        $comment = $feedback ?? '';
+        foreach ($slots as $slot) {
+            $maxmark = (float)$usage->get_question_attempt($slot)->get_max_mark();
+            $mark = $target * $maxmark / $totalmaxmark;
+            $usage->manual_grade((int)$slot, $comment, $mark, FORMAT_PLAIN);
+        }
+        \question_engine::save_questions_usage_by_activity($usage);
+
+        // Moodle's own quiz tests persist the question usage then update this
+        // attempt summary before asking the quiz grade calculator to recompute.
+        $attempt->sumgrades = $usage->get_total_mark();
+        $attempt->timemodified = time();
+        $attempt->gradednotificationsenttime = null;
+        $DB->update_record('quiz_attempts', $attempt);
+        $quizattempt->get_quizobj()->get_grade_calculator()->recompute_final_grade($userid);
+        quiz_update_grades($quiz, $userid);
+    }
+
+    /** Save a whole-forum grade through the module's grade item API. */
+    private static function sync_forum_grade(\cm_info $cm, \stdClass $forum, int $userid, float $grade, ?string $feedback): void {
+        global $CFG;
+        if ((float)$forum->grade_forum <= 0) {
+            throw new \moodle_exception('forumgradeunconfigured', 'local_quessor');
+        }
+        require_once($CFG->dirroot . '/mod/forum/lib.php');
+        $forum->cmidnumber = $cm->idnumber;
+        $gradeitem = [
+            'userid' => $userid,
+            'rawgrade' => min((float)$forum->grade_forum, max(0, $grade)),
+        ];
         if ($feedback !== null) {
             $gradeitem['feedback'] = $feedback;
             $gradeitem['feedbackformat'] = FORMAT_PLAIN;
         }
-        grade_update('mod/' . $cm->modname, $course->id, 'mod', $cm->modname, $instance->id, $itemnumber, [
-            $userid => $gradeitem,
-        ]);
+        forum_grade_item_update($forum, null, [$userid => $gradeitem]);
     }
 
     private static function assignment_submissions(\context_module $context, \stdClass $instance): array {
@@ -339,8 +434,12 @@ final class activity_service {
         );
         $result = [];
         foreach ($records as $record) {
-            if (!self::is_learner($instance->course, $record->userid)) continue;
-            if (isset($result[$record->userid])) continue;
+            if (!self::is_learner($instance->course, $record->userid)) {
+                continue;
+            }
+            if (isset($result[$record->userid])) {
+                continue;
+            }
             $prepared = assignment_service::prepare_submission($context, $record);
             $result[$record->userid] = self::normalise($record->id, $record->userid, $record->attemptnumber, $prepared);
         }
@@ -358,10 +457,14 @@ final class activity_service {
         );
         $result = [];
         foreach ($attempts as $attempt) {
-            if (!self::is_learner($quiz->course, $attempt->userid)) continue;
-            if (isset($result[$attempt->userid])) continue;
+            if (!self::is_learner($quiz->course, $attempt->userid)) {
+                continue;
+            }
+            if (isset($result[$attempt->userid])) {
+                continue;
+            }
             [$text, $files] = self::without_core_deprecation_warnings(
-                static function() use ($attempt): array {
+                static function () use ($attempt): array {
                     $quizattempt = \mod_quiz\quiz_attempt::create($attempt->id);
                     return self::quiz_attempt_content($quizattempt);
                 }
@@ -383,13 +486,27 @@ final class activity_service {
         $records = $DB->get_records('workshop_submissions', ['workshopid' => $workshop->id], 'timemodified DESC, id DESC');
         $result = [];
         foreach ($records as $record) {
-            if (!self::is_learner($workshop->course, $record->authorid)) continue;
-            if (isset($result[$record->authorid])) continue;
+            if (!self::is_learner($workshop->course, $record->authorid)) {
+                continue;
+            }
+            if (isset($result[$record->authorid])) {
+                continue;
+            }
             $files = array_values(get_file_storage()->get_area_files(
-                $context->id, 'mod_workshop', 'submission_attachment', $record->id, 'filepath,filename', false,
+                $context->id,
+                'mod_workshop',
+                'submission_attachment',
+                $record->id,
+                'filepath,filename',
+                false,
             ));
             $files = array_merge($files, array_values(get_file_storage()->get_area_files(
-                $context->id, 'mod_workshop', 'submission_content', $record->id, 'filepath,filename', false,
+                $context->id,
+                'mod_workshop',
+                'submission_content',
+                $record->id,
+                'filepath,filename',
+                false,
             )));
             $text = format_string($record->title) . "\n\n" . html_to_text((string)$record->content, 0, false);
             $prepared = assignment_service::prepare_content($text, $files, [
@@ -410,7 +527,9 @@ final class activity_service {
         );
         $byuser = [];
         foreach ($posts as $post) {
-            if (!self::is_learner($forum->course, $post->userid)) continue;
+            if (!self::is_learner($forum->course, $post->userid)) {
+                continue;
+            }
             $byuser[$post->userid][] = $post;
         }
         $result = [];
@@ -421,9 +540,19 @@ final class activity_service {
             foreach ($userposts as $post) {
                 $parts[] = format_string($post->subject) . "\n" . html_to_text((string)$post->message, 0, false);
                 $files = array_merge($files, array_values(get_file_storage()->get_area_files(
-                    $context->id, 'mod_forum', 'attachment', $post->id, 'filepath,filename', false,
+                    $context->id,
+                    'mod_forum',
+                    'attachment',
+                    $post->id,
+                    'filepath,filename',
+                    false,
                 )), array_values(get_file_storage()->get_area_files(
-                    $context->id, 'mod_forum', 'post', $post->id, 'filepath,filename', false,
+                    $context->id,
+                    'mod_forum',
+                    'post',
+                    $post->id,
+                    'filepath,filename',
+                    false,
                 )));
             }
             $prepared = assignment_service::prepare_content(implode("\n\n---\n\n", $parts), $files, [
@@ -550,7 +679,8 @@ final class activity_service {
         // enrolment ends or the Moodle account is deleted. Requiring an active
         // enrolment made those responses appear in the count but vanish at sync.
         return $DB->record_exists('user', ['id' => $userid])
-            && !has_capability('local/quessor:gradeassignments', $context, $userid);
+            && !has_capability('local/quessor:gradeassignments', $context, $userid)
+            && self::can_access_student($courseid, $userid);
     }
 
     /** Export every answered slot. Description blocks are not questions. */
@@ -765,7 +895,7 @@ final class activity_service {
             return [];
         }
         $questions = self::without_core_deprecation_warnings(
-            static function() use ($attempt, $DB): array {
+            static function () use ($attempt, $DB): array {
                 $questions = [];
                 $quizattempt = \mod_quiz\quiz_attempt::create($attempt->id);
                 foreach ($quizattempt->get_slots() as $slot) {
@@ -775,8 +905,10 @@ final class activity_service {
                         continue;
                     }
                     $graderinfo = trim(html_to_text((string)($question->graderinfo ?? ''), 0, false));
-                    if ($graderinfo === '' && !empty($question->id)
-                        && $DB->get_manager()->table_exists('qtype_essay_options')) {
+                    if (
+                        $graderinfo === '' && !empty($question->id)
+                        && $DB->get_manager()->table_exists('qtype_essay_options')
+                    ) {
                         $graderinfo = trim(html_to_text(
                             (string)$DB->get_field('qtype_essay_options', 'graderinfo', ['questionid' => $question->id]),
                             0,

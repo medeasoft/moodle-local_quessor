@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor\local;
 
@@ -9,14 +25,14 @@ class prepared_submission_file {
     private $generator = null;
 
     public function __construct(
-        string|callable $contentOrGenerator,
+        string|callable $contentorgenerator,
         private readonly string $mimetype,
         private readonly string $filename,
     ) {
-        if (is_callable($contentOrGenerator)) {
-            $this->generator = $contentOrGenerator;
+        if (is_callable($contentorgenerator)) {
+            $this->generator = $contentorgenerator;
         } else {
-            $this->content = $contentOrGenerator;
+            $this->content = $contentorgenerator;
         }
     }
 
@@ -44,8 +60,9 @@ class prepared_submission_file {
 class assignment_service {
     private const OFFICE_EXTENSIONS = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'];
 
-    public static function text_to_pdf(string $text, string $title = 'Moodle submission'): prepared_submission_file {
-        $generator = static function() use ($text, $title): string {
+    public static function text_to_pdf(string $text, ?string $title = null): prepared_submission_file {
+        $title ??= get_string('submissionpdftitle', 'local_quessor');
+        $generator = static function () use ($text, $title): string {
             global $CFG;
             require_once($CFG->libdir . '/pdflib.php');
             $pdf = new \pdf();
@@ -206,8 +223,10 @@ class assignment_service {
         if ($converter->can_convert_storedfile_to($file, 'pdf')) {
             $conversion = $converter->start_conversion($file, 'pdf');
             $status = (int)$conversion->get('status');
-            if ($status === \core_files\conversion::STATUS_PENDING
-                || $status === \core_files\conversion::STATUS_IN_PROGRESS) {
+            if (
+                $status === \core_files\conversion::STATUS_PENDING
+                || $status === \core_files\conversion::STATUS_IN_PROGRESS
+            ) {
                 return ['state' => 'pending'];
             }
             if ($status === \core_files\conversion::STATUS_COMPLETE && $conversion->get_destfile()) {
@@ -241,12 +260,16 @@ class assignment_service {
         }
 
         $tempfile = $file->copy_content_to_temp('local_quessor');
-        if (!$tempfile) return '';
+        if (!$tempfile) {
+            return '';
+        }
         $zip = new \ZipArchive();
         $opened = false;
         try {
             $opened = $zip->open($tempfile) === true;
-            if (!$opened) return '';
+            if (!$opened) {
+                return '';
+            }
             $entries = [];
             for ($index = 0; $index < $zip->numFiles; $index++) {
                 $name = (string)$zip->getNameIndex($index);
@@ -258,7 +281,9 @@ class assignment_service {
                         || preg_match('~^xl/worksheets/sheet\d+\.xml$~', $name),
                     default => $name === 'content.xml',
                 };
-                if ($include) $entries[] = $name;
+                if ($include) {
+                    $entries[] = $name;
+                }
             }
             natsort($entries);
 
@@ -270,7 +295,9 @@ class assignment_service {
                         $sstexts = [];
                         foreach ($matches[1] as $val) {
                             $decoded = html_entity_decode(strip_tags($val), ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
-                            if (trim($decoded) !== '') $sstexts[] = trim($decoded);
+                            if (trim($decoded) !== '') {
+                                $sstexts[] = trim($decoded);
+                            }
                         }
                         if (!empty($sstexts)) {
                             $parts[] = implode("\n", $sstexts);
@@ -280,9 +307,13 @@ class assignment_service {
             }
 
             foreach ($entries as $name) {
-                if ($extension === 'xlsx' && $name === 'xl/sharedStrings.xml') continue;
+                if ($extension === 'xlsx' && $name === 'xl/sharedStrings.xml') {
+                    continue;
+                }
                 $xml = $zip->getFromName($name);
-                if (!is_string($xml) || $xml === '') continue;
+                if (!is_string($xml) || $xml === '') {
+                    continue;
+                }
                 $xml = preg_replace(
                     ['~</(?:w:p|a:p|text:p|table:table-row|p)>~i', '~<(?:w:tab|text:tab)[^>]*/>~i', '~</(?:w:tc|w:t|a:t|text:span|c)>~i'],
                     ["\n", "\t", ' '],
@@ -291,11 +322,15 @@ class assignment_service {
                 $plain = html_entity_decode(strip_tags((string)$xml), ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
                 $plain = preg_replace('/[ \t]+/', ' ', $plain);
                 $plain = preg_replace('/\n\s*\n+/', "\n", (string)$plain);
-                if (trim((string)$plain) !== '') $parts[] = trim((string)$plain);
+                if (trim((string)$plain) !== '') {
+                    $parts[] = trim((string)$plain);
+                }
             }
             return trim(implode("\n\n", $parts));
         } finally {
-            if ($opened) $zip->close();
+            if ($opened) {
+                $zip->close();
+            }
             @unlink($tempfile);
         }
     }

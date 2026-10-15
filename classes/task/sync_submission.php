@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor\task;
 
@@ -13,23 +29,8 @@ final class sync_submission extends \core\task\adhoc_task {
         return get_string('task_sync_submission', 'local_quessor');
     }
 
-    public static function sync_now(int $cmid, int $userid): void {
-        global $USER;
-        $original = $USER;
-        $task = new self();
-        $task->set_custom_data(['cmid' => $cmid, 'userid' => $userid]);
-        try {
-            $task->execute();
-        } finally {
-            if ($original) {
-                \core\session\manager::set_user($original);
-            }
-        }
-    }
-
     public function execute(): void {
         global $DB;
-        \core\session\manager::set_user(get_admin());
         $data = $this->get_custom_data();
         $cmid = (int)($data->cmid ?? 0);
         $userid = (int)($data->userid ?? 0);
@@ -39,7 +40,9 @@ final class sync_submission extends \core\task\adhoc_task {
 
         [$course, $cm, $context, $instance] = activity_service::load($cmid);
         $item = activity_service::latest_for_user($cmid, $userid);
-        if (!$item) return;
+        if (!$item) {
+            return;
+        }
         if ($item['state'] === 'pending') {
             throw new \moodle_exception('conversionpending', 'local_quessor', '', 1);
         }

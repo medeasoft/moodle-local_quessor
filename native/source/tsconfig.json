@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "jsx": "react-jsx",
+    "strict": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@quessor/evaluation-ui": ["native/source/packages/evaluation-ui/src/index.tsx"],
+      "@fullstack/shared": ["native/source/packages/shared/src/browser.ts"],
+      "@fullstack/shared/types": ["native/source/packages/shared/src/types/index.ts"],
+      "@fullstack/shared/types/page.dto": ["native/source/packages/shared/src/types/page.dto.ts"],
+      "@fullstack/shared/payment": ["native/source/packages/shared/src/payment/index.ts"]
+    }
+  },
+  "include": [
+    "../../native-entry.tsx",
+    "../../moodle-http-client.ts",
+    "packages/evaluation-ui/src/**/*",
+    "packages/shared/src/**/*"
+  ]
+}

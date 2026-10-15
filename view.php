@@ -1,4 +1,20 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
@@ -30,11 +46,30 @@ $PAGE->set_secondary_active_tab('local_quessor');
 // The Moodle activity description is already imported as Quessor's question text.
 // Do not render the same long instructions above the native wizard as a duplicate.
 $PAGE->activityheader->set_description('');
-$PAGE->requires->css(new moodle_url('/local/quessor/styles.css'));
 if ($native) {
     $assetversion = (string)(get_config('local_quessor', 'version') ?: '2026082515');
     $PAGE->requires->css(new moodle_url('/local/quessor/native/evaluation-ui.css', ['v' => $assetversion]));
     $PAGE->requires->js(new moodle_url('/local/quessor/native/evaluation-ui.js', ['v' => $assetversion]));
+}
+
+$action = optional_param('action', '', PARAM_ALPHAEXT);
+$explicitlaunch = $action === 'launch' && data_submitted() && confirm_sesskey();
+if (!activity_service::is_connected($cmid) && $explicitlaunch) {
+    activity_service::connect($cmid);
+}
+if (!activity_service::is_connected($cmid)) {
+    echo $OUTPUT->header();
+    echo $OUTPUT->heading(get_string('connectactivitytitle', 'local_quessor'));
+    echo html_writer::tag('p', get_string('connectactivitydesc', 'local_quessor'));
+    echo html_writer::start_tag('form', ['method' => 'post', 'action' => $PAGE->url]);
+    echo html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
+    echo html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => 'launch']);
+    echo html_writer::tag('button', get_string('connectactivitybutton', 'local_quessor'), [
+        'type' => 'submit', 'class' => 'btn btn-primary',
+    ]);
+    echo html_writer::end_tag('form');
+    echo $OUTPUT->footer();
+    exit;
 }
 
 $payload = array_merge(
@@ -51,9 +86,13 @@ $ready = [];
 $pendingcount = 0;
 $unsupportedcount = 0;
 foreach ($items as $item) {
-    if ($item['state'] === 'ready') $ready[] = $item;
-    else if ($item['state'] === 'pending') $pendingcount++;
-    else if ($item['state'] === 'unsupported') $unsupportedcount++;
+    if ($item['state'] === 'ready') {
+        $ready[] = $item;
+    } else if ($item['state'] === 'pending') {
+        $pendingcount++;
+    } else if ($item['state'] === 'unsupported') {
+        $unsupportedcount++;
+    }
 }
 
 $wizardurl = null;
@@ -81,8 +120,6 @@ try {
     \core\notification::add($e->getMessage(), \core\output\notification::NOTIFY_ERROR);
 }
 
-$action = optional_param('action', '', PARAM_ALPHAEXT);
-$explicitlaunch = $action === 'launch' && data_submitted() && confirm_sesskey();
 $explicitquestionretry = $action === 'retry_question_extraction' && data_submitted() && confirm_sesskey();
 if ($explicitquestionretry) {
     try {
@@ -93,8 +130,7 @@ if ($explicitquestionretry) {
     }
     redirect(new moodle_url('/local/quessor/view.php', ['cmid' => $cmid]));
 }
-$reconcilecurrent = !$explicitlaunch && $wizardurl && $ready;
-if ($explicitlaunch || $reconcilecurrent) {
+if ($explicitlaunch && $wizardurl && $ready) {
     try {
         $submissionids = array_column($ready, 'submissionid');
         $existingsubmissions = [];
@@ -111,33 +147,21 @@ if ($explicitlaunch || $reconcilecurrent) {
         }
 
         $queuedcount = 0;
-        $inlined = false;
         foreach ($ready as $item) {
             $existing = $existingsubmissions[$item['submissionid']] ?? null;
             if (!$existing || $existing->sourcehash !== $item['sourceHash']) {
-                if (!$inlined) {
-                    try {
-                        \local_quessor\task\sync_submission::sync_now($cmid, (int)$item['userid']);
-                        $inlined = true;
-                        $queuedcount++;
-                        continue;
-                    } catch (Throwable $e) {
-                        debugging('Quessor inline submission sync failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
-                    }
-                }
                 $task = new \local_quessor\task\sync_submission();
                 $task->set_custom_data(['cmid' => $cmid, 'userid' => (int)$item['userid']]);
+                $task->set_userid((int)$USER->id);
                 $task->set_attempts_available(10);
                 \core\task\manager::queue_adhoc_task($task, true);
                 $queuedcount++;
             }
         }
-        if ($explicitlaunch) {
-            if ($queuedcount > 0) {
-                \core\notification::add(get_string('task_sync_submission', 'local_quessor') . " ({$queuedcount})", \core\output\notification::NOTIFY_SUCCESS);
-            }
-            redirect(new moodle_url('/local/quessor/view.php', ['cmid' => $cmid]));
+        if ($queuedcount > 0) {
+            \core\notification::add(get_string('task_sync_submission', 'local_quessor') . " ({$queuedcount})", \core\output\notification::NOTIFY_SUCCESS);
         }
+        redirect(new moodle_url('/local/quessor/view.php', ['cmid' => $cmid]));
     } catch (Throwable $e) {
         \core\notification::add($e->getMessage(), \core\output\notification::NOTIFY_ERROR);
     }
@@ -162,47 +186,32 @@ $sourceinfo = (object)[
 $criteriakey = trim((string)$payload['rubric']) !== ''
     ? 'datasource_criteria_' . $cm->modname . '_rubric'
     : 'datasource_criteria_' . $cm->modname;
-$sources = [
+$sourcekeys = [
     ['question', 'datasource_question_' . $cm->modname],
     ['criteria', $criteriakey],
     ['pages', 'datasource_pages_' . $cm->modname],
     ['students', 'datasource_students_description'],
     ['context', 'datasource_context_description'],
 ];
-echo html_writer::start_tag('details', ['class' => 'local-quessor-source-card mb-3']);
-echo html_writer::start_tag('summary', ['class' => 'local-quessor-source-card__summary']);
-echo html_writer::tag('span', html_writer::tag('i', '', [
-    'class' => 'fa fa-question-circle',
-    'aria-hidden' => 'true',
-]), ['class' => 'local-quessor-source-card__icon', 'aria-hidden' => 'true']);
-echo html_writer::tag('span', get_string('datasources_title', 'local_quessor'), ['class' => 'local-quessor-source-card__title']);
-echo html_writer::tag('span', html_writer::tag('i', '', [
-    'class' => 'fa fa-chevron-down',
-    'aria-hidden' => 'true',
-]), ['class' => 'local-quessor-source-card__chevron', 'aria-hidden' => 'true']);
-echo html_writer::end_tag('summary');
-
-echo html_writer::start_div('local-quessor-source-card__content');
-echo html_writer::tag('p', get_string('datasources_intro', 'local_quessor'), [
-    'class' => 'local-quessor-source-card__intro',
-]);
-echo html_writer::start_div('local-quessor-source-card__grid');
-foreach ($sources as [$labelkey, $descriptionkey]) {
-    echo html_writer::start_div('local-quessor-source-card__item');
-    echo html_writer::tag('strong', get_string('datasource_' . $labelkey, 'local_quessor'), [
-        'class' => 'local-quessor-source-card__label',
-    ]);
-    echo html_writer::tag('span', get_string($descriptionkey, 'local_quessor', $sourceinfo), [
-        'class' => 'local-quessor-source-card__value',
-    ]);
-    echo html_writer::end_div();
+$sourcecard = [
+    'title' => get_string('datasources_title', 'local_quessor'),
+    'intro' => get_string('datasources_intro', 'local_quessor'),
+    'sources' => [],
+];
+foreach ($sourcekeys as [$labelkey, $descriptionkey]) {
+    $sourcecard['sources'][] = [
+        'label' => get_string('datasource_' . $labelkey, 'local_quessor'),
+        'description' => get_string($descriptionkey, 'local_quessor', $sourceinfo),
+    ];
 }
-echo html_writer::end_div();
-echo html_writer::end_div();
-echo html_writer::end_tag('details');
+echo $OUTPUT->render_from_template('local_quessor/source_card', $sourcecard);
 
-if ($pendingcount) echo html_writer::div(get_string('conversionpending', 'local_quessor', $pendingcount), 'alert alert-info');
-if ($unsupportedcount) echo html_writer::div(get_string('conversionunsupported', 'local_quessor', $unsupportedcount), 'alert alert-warning');
+if ($pendingcount) {
+    echo html_writer::div(get_string('conversionpending', 'local_quessor', $pendingcount), 'alert alert-info');
+}
+if ($unsupportedcount) {
+    echo html_writer::div(get_string('conversionunsupported', 'local_quessor', $unsupportedcount), 'alert alert-warning');
+}
 if (!$ready && $cm->modname === 'quiz') {
     echo html_writer::div(get_string('quiznoreadyresponses', 'local_quessor'), 'alert alert-warning');
 }

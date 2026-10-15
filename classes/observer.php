@@ -1,16 +1,33 @@
 <?php
+// This file is part of Moodle - http://moodle.org/.
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with Moodle. If not, see <http://www.gnu.org/licenses/>.
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+// @copyright 2026 Medeasoft
+// @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 
 namespace local_quessor;
 
 defined('MOODLE_INTERNAL') || die();
 
 use local_quessor\local\activity_service;
-use local_quessor\local\api_client;
 
 final class observer {
     public static function assignment_submitted(\mod_assign\event\assessable_submitted $event): void {
         $snapshot = $event->get_record_snapshot('assign_submission', $event->objectid);
-        if ($snapshot && $snapshot->userid) self::queue_latest($event->contextinstanceid, $snapshot->userid);
+        if ($snapshot && $snapshot->userid) {
+            self::queue_latest($event->contextinstanceid, $snapshot->userid);
+        }
     }
 
     public static function quiz_submitted(\mod_quiz\event\attempt_submitted $event): void {
@@ -20,7 +37,9 @@ final class observer {
     public static function workshop_changed(\core\event\base $event): void {
         global $DB;
         $submission = $DB->get_record('workshop_submissions', ['id' => $event->objectid], 'authorid');
-        if ($submission) self::queue_latest($event->contextinstanceid, $submission->authorid);
+        if ($submission) {
+            self::queue_latest($event->contextinstanceid, $submission->authorid);
+        }
     }
 
     public static function forum_changed(\core\event\base $event): void {
@@ -33,7 +52,12 @@ final class observer {
 
     private static function queue_latest(int $cmid, int $userid): void {
         global $DB;
-        if (!$cmid || !$userid) return;
+        if (
+            !$cmid || !$userid || !get_config('local_quessor', 'enabled')
+            || !activity_service::is_connected($cmid)
+        ) {
+            return;
+        }
 
         // A first submission has no local_quessor_submission row yet. It must
         // still be queued; otherwise only submissions discovered while a
@@ -59,17 +83,5 @@ final class observer {
         $task->set_custom_data(['cmid' => $cmid, 'userid' => $userid]);
         $task->set_attempts_available(10);
         \core\task\manager::queue_adhoc_task($task, true);
-    }
-
-    public static function user_loggedout(\core\event\user_loggedout $event): void {
-        global $DB;
-        if (!$event->objectid) return;
-        try {
-            $user = $DB->get_record('user', ['id' => $event->objectid], 'id,email');
-            $email = $user ? (string)$user->email : '';
-            (new api_client())->logout((string)$event->objectid, $email);
-        } catch (\Throwable $e) {
-            debugging('Quessor logout notification failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
-        }
     }
 }
